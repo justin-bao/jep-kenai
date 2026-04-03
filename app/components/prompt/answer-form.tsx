@@ -1,4 +1,5 @@
 import { useFetcher } from "@remix-run/react";
+import * as React from "react";
 
 import Button from "~/components/button";
 import type { RoomProps } from "~/components/game";
@@ -6,6 +7,7 @@ import Input from "~/components/input";
 import type { Action } from "~/engine";
 import { useEngineContext } from "~/engine";
 import useSoloAction from "~/utils/use-solo-action";
+import useSpeechRecognition from "~/utils/use-speech-recognition";
 
 function AnswerForm({
   submittedAnswer,
@@ -14,6 +16,17 @@ function AnswerForm({
   submittedAnswer?: string;
   loading: boolean;
 }) {
+  const [inputValue, setInputValue] = React.useState("");
+
+  const handleFinalTranscript = React.useCallback((t: string) => {
+    setInputValue(t);
+  }, []);
+
+  const { interimTranscript, isListening, startListening, stopListening, supported } =
+    useSpeechRecognition(handleFinalTranscript);
+
+  const displayValue = isListening ? interimTranscript : inputValue;
+
   return (
     <div className="flex flex-col items-center gap-2 p-2">
       {submittedAnswer ? (
@@ -36,13 +49,28 @@ function AnswerForm({
           name="answer"
           placeholder="What is..."
           required
+          value={displayValue}
+          onChange={(e) => setInputValue(e.target.value)}
           className={`min-w-48 font-handwriting text-xl font-bold
           placeholder:font-sans placeholder:font-normal`}
         />
+        {supported && (
+          <Button
+            type={isListening ? "primary" : undefined}
+            htmlType="button"
+            onClick={isListening ? stopListening : startListening}
+            title={isListening ? "Stop recording" : "Record answer"}
+          >
+            {isListening ? "■" : "🎤"}
+          </Button>
+        )}
         <Button type="primary" htmlType="submit" loading={loading}>
           submit
         </Button>
       </div>
+      {isListening && (
+        <p className="animate-pulse text-xs text-slate-300">Listening...</p>
+      )}
     </div>
   );
 }

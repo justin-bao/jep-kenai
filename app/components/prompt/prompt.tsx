@@ -13,9 +13,11 @@ import {
   QUANTIZATION_FACTOR_MS,
   useEngineContext,
 } from "~/engine";
+import type { AiCheckResult } from "~/routes/room.$roomId.ai-check";
 import useKeyPress from "~/utils/use-key-press";
 import useSoloAction from "~/utils/use-solo-action";
 import useGameSound from "~/utils/use-sound";
+import useSpeechRecognition from "~/utils/use-speech-recognition";
 import useTimeout from "~/utils/use-timeout";
 
 import { ConnectedAnswerForm as AnswerForm } from "./answer-form";
@@ -598,6 +600,46 @@ function RevealAnswerToBuzzerPrompt({ roomId, userId }: RoomProps) {
   const canShowAnswer = winningBuzzer === userId;
   const [showAnswer, setShowAnswer] = React.useState(false);
 
+  // AI check fetcher
+  const aiFetcher = useFetcher<AiCheckResult>();
+
+  // When speech is finalized, reveal the answer and call the AI
+  const handleFinalTranscript = React.useCallback(
+    (spokenAnswer: string) => {
+      setShowAnswer(true);
+      const [i, j] = activeClue;
+      aiFetcher.submit(
+        {
+          playerAnswer: spokenAnswer,
+          correctAnswer: clue.answer,
+          clueText: clue.clue,
+          i: i.toString(),
+          j: j.toString(),
+          userId,
+        },
+        { method: "post", action: `/room/${roomId}/ai-check` },
+      );
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [clue, activeClue, roomId, userId],
+  );
+
+  const {
+    interimTranscript,
+    isListening,
+    supported,
+    startListening,
+    transcript,
+  } = useSpeechRecognition(handleFinalTranscript);
+
+  // Auto-start the mic for the winning buzzer as soon as the state begins
+  React.useEffect(() => {
+    if (canShowAnswer && supported) {
+      startListening();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Play the "time's up" sound after 5 seconds if the contestant can reveal the
   // answer but hasn't yet.
   const [playTimesUpSfx] = useGameSound(TIMES_UP_SFX);
@@ -612,6 +654,10 @@ function RevealAnswerToBuzzerPrompt({ roomId, userId }: RoomProps) {
   const winningPlayerName = winningBuzzer
     ? players.get(winningBuzzer)?.name ?? "winning buzzer"
     : "winning buzzer";
+
+  const aiVerdict = aiFetcher.data;
+  const isAiLoading = aiFetcher.state !== "idle";
+  const voiceTranscript = transcript || interimTranscript || undefined;
 
   return (
     <>
@@ -639,14 +685,27 @@ function RevealAnswerToBuzzerPrompt({ roomId, userId }: RoomProps) {
         showAnswer={false}
       />
       {canShowAnswer ? (
-        <CheckForm
-          roomId={roomId}
-          userId={userId}
-          showAnswer={canShowAnswer && showAnswer}
-          onClickShowAnswer={
-            canShowAnswer ? () => setShowAnswer(true) : () => null
-          }
-        />
+        <>
+          {isListening && !interimTranscript && (
+            <p className="animate-pulse p-2 text-center text-sm text-slate-300">
+              🎤 Listening… speak your answer
+            </p>
+          )}
+          {interimTranscript && (
+            <p className="p-2 text-center font-handwriting text-2xl font-bold text-white">
+              {interimTranscript}
+            </p>
+          )}
+          <CheckForm
+            roomId={roomId}
+            userId={userId}
+            showAnswer={showAnswer || isAiLoading || !!aiVerdict}
+            onClickShowAnswer={() => setShowAnswer(true)}
+            aiVerdict={aiVerdict}
+            isAiLoading={isAiLoading}
+            voiceTranscript={voiceTranscript}
+          />
+        </>
       ) : (
         <p className="p-2 text-center font-bold text-white">
           Waiting for response from {winningPlayerName}...
